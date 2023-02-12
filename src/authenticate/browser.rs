@@ -5,6 +5,9 @@ use std::net::SocketAddr;
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, self, Write};
+use std::path::PathBuf;
+
+use home::home_dir;
 
 use hyper::server::conn::AddrStream;
 use hyper::{Body, Response, Request, Server};
@@ -15,8 +18,9 @@ use google_drive::Client;
 const PORT: u16 = 3087;
 const CLIENT_ID: &'static str = "957076101620-pe34fuljjgf45on19fhsq8d9upepjj3m.apps.googleusercontent.com";
 const CLIENT_SECRET: &'static str = "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";
-const CODE_VERIFIER: &'static str = "mbD-tYXw0716E1Of8Bx0b2Z6a253D8yINEKTZTDvntkSDleLMgWcIrU4krGvHnme4jdrVz8NMPkUwj.5X0FY_9T_FfdZjhSYYi3AOcLPZnLfxykqa-OyiDOt-AWtGmT4";
-const SAVED_DATA_FILENAME: &'static str = ".filesync";
+// currently not used, may be in the future
+const _CODE_VERIFIER: &'static str = "mbD-tYXw0716E1Of8Bx0b2Z6a253D8yINEKTZTDvntkSDleLMgWcIrU4krGvHnme4jdrVz8NMPkUwj.5X0FY_9T_FfdZjhSYYi3AOcLPZnLfxykqa-OyiDOt-AWtGmT4";
+const SAVED_DATA_FILENAME: &'static str = "AppData/filesync";
 
 #[derive(Debug)]
 pub struct GoogleResponse {
@@ -25,6 +29,7 @@ pub struct GoogleResponse {
 }
 
 fn parse_uri(uri: &str) -> Option<GoogleResponse> {
+    // parse the 'GoogleResponse' from the google redirected uri
     let second_part = uri.split("code=").nth(1)?;
     let mut end = second_part.split("&scope=");
     let code = end.next()?.to_string();
@@ -33,11 +38,17 @@ fn parse_uri(uri: &str) -> Option<GoogleResponse> {
 }
 
 async fn handle(tx: Sender<GoogleResponse>, request: Request<Body>) -> Result<Response<Body>, Infallible> {
+    // the response from the redirected uri
+
+    // send the GoogleResponse over this channel, ending the server
     tx.send(parse_uri(&request.uri().to_string()).expect("Error in response from google...")).await.unwrap();
     Ok(Response::new(Body::from("You can close this window.")))
 }
 
 async fn get_auth_code() -> GoogleResponse {
+    // set up a web server to receive the redirected uri from googles auth
+    // use mpsc channels to send the auth data, and notify the server to end
+
     let (tx, mut rx) = mpsc::channel(1);
 
     let make_service = make_service_fn(move |_conn: &AddrStream| {
@@ -58,6 +69,7 @@ async fn get_auth_code() -> GoogleResponse {
 
     let graceful = server.with_graceful_shutdown(
         async {
+            // end when receiving data over the channel
             let login_channel = rx.recv().await.unwrap();
             login = Some(login_channel);
         }
@@ -80,9 +92,13 @@ async fn get_auth_code() -> GoogleResponse {
     login.unwrap()
 }
 
+fn file_path() -> PathBuf {
+    home_dir().unwrap().join(SAVED_DATA_FILENAME)
+}
+
 fn read_refresh_token() -> Option<String> {
     // read first line
-    let mut file = File::open(SAVED_DATA_FILENAME).ok()?;
+    let mut file = File::open(file_path()).ok()?;
     let mut string_buf = String::new();
     file.read_to_string(&mut string_buf).ok()?;
     let mut lines = string_buf.split("\r\n");
@@ -94,7 +110,7 @@ fn write_refresh_token(refresh_token: &str) -> io::Result<()> {
         .read(true)
         .write(true)
         .create(true)
-        .open(SAVED_DATA_FILENAME)?;
+        .open(file_path())?;
     
     let mut string_buf = String::new();
     let _ = file.read_to_string(&mut string_buf)?;
@@ -110,6 +126,8 @@ fn write_refresh_token(refresh_token: &str) -> io::Result<()> {
 }
 
 async fn new_user_client() -> Client {
+    // new user
+    // get auth code from browser, and use this to get access token and refresh token
     let mut client = Client::new(
         CLIENT_ID,
         CLIENT_SECRET,
