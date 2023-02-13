@@ -1,9 +1,10 @@
-mod file_diffs;
+mod filesystem;
 mod authenticate;
+
+use filesystem::upload::upload_to_drive;
 
 use authenticate::auth::get_drive_client;
 use tokio;
-
 use std::env::args;
 
 fn help() {
@@ -25,6 +26,21 @@ async fn main() -> Result<(), ()> {
         return Ok(())
     }
 
-    let client = get_drive_client().await;
+    let (client, token) = get_drive_client().await;
+
+    match command.unwrap().as_str() {
+        "up" => {
+            upload_to_drive(&token).await
+        },
+        "down" => {
+
+        },
+        _ => {
+            println!("Invalid argument given.");
+            help();
+            return Ok(());
+        }
+    }
+
     Ok(())
 }

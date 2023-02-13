@@ -1,4 +1,4 @@
-use google_drive::Client;
+use google_drive::{Client, AccessToken};
 
 use super::auth_code::get_auth_code;
 use super::token_storing::{read_refresh_token, write_refresh_token};
@@ -10,7 +10,7 @@ const _CODE_VERIFIER: &'static str = "mbD-tYXw0716E1Of8Bx0b2Z6a253D8yINEKTZTDvnt
 pub const PORT: u16 = 3087;
 
 
-async fn new_user_client() -> Client {
+async fn new_user_client() -> (Client, AccessToken) {
     // new user
     // get auth code from browser, and use this to get access token and refresh token
 
@@ -32,10 +32,10 @@ async fn new_user_client() -> Client {
 
     write_refresh_token(&token.refresh_token).expect("Couldn't write to file");
     println!("Logged in");
-    client
+    (client, token)
 }
 
-pub async fn get_drive_client() -> Client {
+pub async fn get_drive_client() -> (Client, AccessToken) {
     // if refresh token exists, use this to get a access token
     // else, prompt user login
 
@@ -43,24 +43,29 @@ pub async fn get_drive_client() -> Client {
 
     match refresh_token {
         Some(refresh_token) => {
-            let mut client = Client::new(
+            let client = Client::new(
                 CLIENT_ID,
                 CLIENT_SECRET,
                 "http://127.0.0.1:0",
                 "",
                 refresh_token
             );
-            let access_token = client.refresh_access_token().await;
+            let access_token_res = client.refresh_access_token().await;
 
-            if access_token.is_err() | (access_token.unwrap().access_token == "") {
-                // error with refresh token, login again
-                client = new_user_client().await;
+            match access_token_res {
+                Ok(token) => {
+                    if token.access_token == "" {
+                        return new_user_client().await;
+                    }
+                    return (client, token)
+                },
+                Err(e) => {
+                    return new_user_client().await;
+                }
             }
-
-            client
         },
         None => {
-            new_user_client().await
+            return new_user_client().await
         }
-    }
+    };
 }
