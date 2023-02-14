@@ -26,11 +26,12 @@ fn parse_uri(uri: &str) -> Option<GoogleResponse> {
     Some(GoogleResponse { code, scope })
 }
 
-async fn handle(tx: Sender<GoogleResponse>, request: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn handle(tx: Sender<Option<GoogleResponse>>, request: Request<Body>) -> Result<Response<Body>, Infallible> {
     // the response from the redirected uri
 
     // send the GoogleResponse over this channel, ending the server
-    tx.send(parse_uri(&request.uri().to_string()).expect("Error in response from google...")).await.unwrap();
+    let response = parse_uri(&request.uri().to_string());
+    tx.send(response).await.unwrap();
     Ok(Response::new(Body::from("You can close this window.")))
 }
 
@@ -59,7 +60,7 @@ pub async fn get_auth_code() -> GoogleResponse {
     let graceful = server.with_graceful_shutdown(
         async {
             // end when receiving data over the channel
-            let login_channel = rx.recv().await.unwrap();
+            let login_channel = rx.recv().await.unwrap().expect("Error in response from google...");
             login = Some(login_channel);
         }
     );
@@ -68,7 +69,7 @@ pub async fn get_auth_code() -> GoogleResponse {
         AUTH_ROOT, "?",
         "redirect_uri=http://127.0.0.1:", PORT, "^&",
         "response_type=code^&",
-        "scope=https://www.googleapis.com/auth/drive.file^&",
+        "scope=https://www.googleapis.com/auth/drive.appdata^&",
         "client_id=", CLIENT_ID, "^&"
     );
 

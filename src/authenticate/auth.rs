@@ -59,7 +59,7 @@ pub async fn get_drive_client() -> (Client, AccessToken) {
                     }
                     return (client, token)
                 },
-                Err(e) => {
+                Err(_) => {
                     return new_user_client().await;
                 }
             }

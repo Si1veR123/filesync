@@ -1,55 +1,55 @@
 use super::zip::compress_dir;
-use super::TEMP_ZIP_LOCATION;
+use super::{TEMP_ZIP_LOCATION, directory_name, delete_from_cloud};
 
+use std::path::PathBuf;
 use std::env::current_dir;
 use std::io::Read;
-use std::fs::File;
+use std::fs::{File, remove_file};
 use zip::CompressionMethod;
-use google_drive::AccessToken;
-use hyper::{Request, Body, Client, StatusCode};
+use google_drive::{AccessToken, Client};
+use hyper::{self, Request, Body, StatusCode};
 use hyper_tls::HttpsConnector;
+use serde_json;
 
 const UPLOAD_ENDPOINT: &'static str = "https://www.googleapis.com/upload/drive/v3/files";
 
-fn create_multipart_data(metadata: Vec<(&str, &str)>, data_bytes: Vec<u8>) -> Vec<u8> {
-    let part1_first = "Content-Type: application/json; charset=UTF-8\r\n\r\n{".as_bytes();
-
-    let json_data = metadata.iter().fold(String::new(), |acc, x| format!("{acc}\"{}\":\"{}\",", x.0, x.1));
-    let part1_middle;
-    if metadata.len() > 0 {
-        part1_middle = &json_data.as_bytes()[..json_data.len() - 1];
-    } else {
-        part1_middle = "".as_bytes();
-    }
-    let part1_end = "}\r\n".as_bytes();
-
-    let part1 = [part1_first, part1_middle, part1_end].concat();
+fn create_multipart_data(metadata: serde_json::Value, data_bytes: Vec<u8>) -> Vec<u8> {
+    let part1_header = "Content-Type: application/json; charset=UTF-8\r\n\r\n".as_bytes();
+    let metadata_str = metadata.to_string();
+    let part1_middle = metadata_str.as_bytes();
+    let part1_end = "\r\n".as_bytes();
 
     let part2_header = "Content-Type: application/zip\r\n\r\n".as_bytes();
     let part2_data = data_bytes.as_slice();
     //let part2_data = "data".as_bytes();
     let part2_end = "\r\n".as_bytes();
 
-    let part2 = [part2_header, part2_data, part2_end].concat();
-
     let body_boundary = "--filesync_boundary\r\n".as_bytes();
     let end_boundary = "--filesync_boundary--\r\n".as_bytes();
 
-    let body = [body_boundary, part1.as_slice(), body_boundary, part2.as_slice(), end_boundary].concat();
-    body
+    [body_boundary, part1_header, part1_middle, part1_end, body_boundary, part2_header, part2_data, part2_end, end_boundary].concat()
 }
 
 async fn upload_zip(token: &AccessToken, path: &str) {
-    let url = format!("{}?uploadType=multipart", UPLOAD_ENDPOINT);
+    let url = format!("{UPLOAD_ENDPOINT}?uploadType=multipart");
+
+    let path = PathBuf::try_from(path).unwrap();
 
     let mut file = File::open(path).unwrap();
     let mut bytes = vec![];
     let _ = file.read_to_end(&mut bytes);
 
     let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
+    let client = hyper::Client::builder().build::<_, hyper::Body>(https);
 
-    let multipart_data = create_multipart_data(vec![("name", "name")], bytes);
+    let metadata = serde_json::Value::Object(
+        serde_json::Map::from_iter([
+            ("name".to_string(), serde_json::Value::String(directory_name())),
+            ("parents".to_string(), serde_json::Value::Array(vec![serde_json::Value::String("appDataFolder".to_string())]))
+        ].into_iter())
+    );
+
+    let multipart_data = create_multipart_data(metadata, bytes);
 
     println!("Uploading...");
 
@@ -72,7 +72,9 @@ async fn upload_zip(token: &AccessToken, path: &str) {
     }
 }
 
-pub async fn upload_to_drive(token: &AccessToken) {
+pub async fn upload_to_drive(client: &Client, token: &AccessToken) {
+    // use client for the google drive crate's api methods
+    // use token for more custom api calls
     let dir = current_dir().unwrap();
 
     let zip_path = dir.join(TEMP_ZIP_LOCATION);
@@ -88,5 +90,16 @@ pub async fn upload_to_drive(token: &AccessToken) {
         panic!("Failed to compress folder");
     }
 
+    delete_from_cloud(client).await;
     upload_zip(token, zip_path_str).await;
+    println!("Deleting temporary zip...");
+    let res = remove_file(zip_path_str);
+    match res {
+        Ok(_) => {
+            println!("Deleted!");
+        }
+        Err(_) => {
+            panic!("Failed to delete temporary zip.");
+        }
+    }
 }

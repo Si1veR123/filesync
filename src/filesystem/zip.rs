@@ -38,7 +38,7 @@ where
         let name = path.strip_prefix(Path::new(prefix)).unwrap();
 
         let fraction_complete = n as f64 / complete_count as f64;
-        print!("\r{}%\t{}", (fraction_complete*100.0).round()/100.0, path.display());
+        print!("\r{}%\t{}", (fraction_complete*100.0).round(), path.display());
         std::io::stdout().flush().unwrap();
 
         // Write file or directory explicitly
@@ -102,7 +102,7 @@ pub fn compress_dir(
             ignore_filenames.extend(string_buf.split("\r\n").map(|s| s.to_string()));
         }
         Err(_) => {
-            println!("Ignore file {} not found", IGNORE_FILE);
+            println!("Ignore file '{IGNORE_FILE}' not found");
         }
     }
 
