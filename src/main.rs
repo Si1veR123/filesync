@@ -3,10 +3,11 @@ mod authenticate;
 
 use filesystem::upload::upload_to_drive;
 use filesystem::download::download_from_drive;
-use filesystem::{delete_from_cloud, directory_name, get_all_files};
+use filesystem::{delete_from_cloud, get_directory_name, get_all_files, current_dir};
 
 use authenticate::auth::get_drive_client;
 use authenticate::token_storing::delete_refresh_token;
+use authenticate::APICredentials;
 
 use tokio;
 use std::env::args;
@@ -28,19 +29,19 @@ fn help() {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), ()> {
+async fn main() -> anyhow::Result<()> {
     let command = args().nth(1);
     if command.is_none() {
         help();
         return Ok(())
     }
 
-    println!("Filesync (directory: {})", directory_name());
+    println!("Filesync (directory: {})", get_directory_name(&current_dir())?);
 
     match command.unwrap().as_str() {
         "up" => {
-            let (client, token) = get_drive_client().await;
-            upload_to_drive(&client, &token).await
+            let APICredentials(client, token) = get_drive_client().await?;
+            upload_to_drive(&client, &token).await?
         },
         "down" => {
             let overwrite = match args().nth(2) {
@@ -48,12 +49,11 @@ async fn main() -> Result<(), ()> {
                 Some(arg) => arg.to_lowercase() == "-o"
             };
 
-            let (client, _token) = get_drive_client().await;
-            download_from_drive(&client, overwrite).await
+            let APICredentials(client, _token) = get_drive_client().await?;
+            download_from_drive(&client, overwrite).await?
         },
         "logout" => {
-            let result = delete_refresh_token();
-            match result {
+            match delete_refresh_token() {
                 Ok(_) => {
                     println!("Logged out");
                 },
@@ -63,11 +63,11 @@ async fn main() -> Result<(), ()> {
             }
         },
         "delete" => {
-            let (client, _token) = get_drive_client().await;
-            delete_from_cloud(&client).await;
+            let APICredentials(client, _token) = get_drive_client().await?;
+            delete_from_cloud(&client).await?;
         },
         "list" => {
-            let (client, _token) = get_drive_client().await;
+            let APICredentials(client, _token) = get_drive_client().await?;
             let files = get_all_files(&client).await;
             match files {
                 Ok(files) => {

@@ -35,17 +35,15 @@ async fn handle(tx: Sender<Option<GoogleResponse>>, request: Request<Body>) -> R
     Ok(Response::new(Body::from("You can close this window.")))
 }
 
-pub async fn get_auth_code() -> GoogleResponse {
+pub async fn get_auth_code() -> anyhow::Result<GoogleResponse> {
     // set up a web server to receive the redirected uri from googles auth
     // use mpsc channels to send the auth data, and notify the server to end
-
     let (tx, mut rx) = mpsc::channel(1);
 
-    let make_service = make_service_fn(move |_conn: &AddrStream| {
-        let tx1 = tx.clone();
-
+    let service = make_service_fn(move |_conn: &AddrStream| {
+        let tx_clone = tx.clone();
         let service = service_fn(move |req| {
-            handle(tx1.clone(), req)
+            handle(tx_clone.clone(), req)
         });
 
         async move { Ok::<_, Infallible>(service) }
@@ -53,10 +51,9 @@ pub async fn get_auth_code() -> GoogleResponse {
 
     let addr = SocketAddr::from(([127, 0, 0, 1], PORT));
     let server = Server::bind(&addr)
-        .serve(make_service);
+        .serve(service);
 
     let mut login = None;
-
     let graceful = server.with_graceful_shutdown(
         async {
             // end when receiving data over the channel
@@ -65,19 +62,28 @@ pub async fn get_auth_code() -> GoogleResponse {
         }
     );
 
-    let url = format!("{}{}{}{}{}{}{}{}{}{}",
-        AUTH_ROOT, "?",
-        "redirect_uri=http://127.0.0.1:", PORT, "^&",
+    let url = String::from_iter([
+        AUTH_ROOT,
+        "?",
+        "redirect_uri=http://127.0.0.1:",
+        PORT.to_string().as_str(),
+        "^&",
         "response_type=code^&",
         "scope=https://www.googleapis.com/auth/drive.appdata^&",
-        "client_id=", CLIENT_ID, "^&"
-    );
+        "client_id=",
+        CLIENT_ID,
+        "^&"
+    ].into_iter());
 
     println!("Opening google auth page...");
-    std::process::Command::new("cmd.exe").arg("/C").arg("start").arg(&url).spawn().unwrap();
+    std::process::Command::new("cmd.exe")
+        .arg("/C")
+        .arg("start")
+        .arg(&url)
+        .spawn()?;
     println!("Waiting for login...");
 
-    graceful.await.unwrap();
+    graceful.await?;
 
-    login.unwrap()
+    Ok(login.unwrap())
 }

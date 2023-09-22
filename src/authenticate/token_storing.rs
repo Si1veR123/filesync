@@ -1,22 +1,22 @@
 use home::home_dir;
+use anyhow::anyhow;
 
 use std::fs::{File, OpenOptions, remove_file};
-use std::io::{Read, self, Write};
+use std::io::{self, Write, BufRead, BufReader};
 use std::path::PathBuf;
 
 const SAVED_DATA_FILENAME: &'static str = "AppData\\Local\\filesync";
 
 fn file_path() -> PathBuf {
-    home_dir().unwrap().join(SAVED_DATA_FILENAME)
+    home_dir().expect("Error getting home directory.").join(SAVED_DATA_FILENAME)
 }
 
 pub fn read_refresh_token() -> Option<String> {
     // read first line
-    let mut file = File::open(file_path()).ok()?;
-    let mut string_buf = String::new();
-    file.read_to_string(&mut string_buf).ok()?;
-    let mut lines = string_buf.split("\r\n");
-    Some(lines.nth(0)?.to_string())
+    let file = File::open(file_path()).ok()?;
+    let buf = BufReader::new(file);
+    let mut lines = buf.lines();
+    Some(lines.next()?.ok()?)
 }
 
 pub fn write_refresh_token(refresh_token: &str) -> io::Result<()> {
@@ -25,15 +25,15 @@ pub fn write_refresh_token(refresh_token: &str) -> io::Result<()> {
         .create(true)
         .open(file_path())?;
 
-    let _ = file.set_len(0);
-    let _ = file.write(refresh_token.as_bytes())?;
+    file.set_len(0)?;
+    file.write(refresh_token.as_bytes())?;
     Ok(())
 }
 
-pub fn delete_refresh_token() -> Result<(), String> {
+pub fn delete_refresh_token() -> anyhow::Result<()> {
     let result = remove_file(file_path());
     match result {
         Ok(_) => Ok(()),
-        Err(_) => Err(format!("Error deleting token. You can manually delete from {}", file_path().display())),
+        Err(_) => Err(anyhow!("Error deleting token. You can manually delete from {}", file_path().display())),
     }
 }

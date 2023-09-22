@@ -1,71 +1,71 @@
+use std::ffi::OsStr;
 use std::io::{Cursor, stdin};
-use std::env::current_dir;
 use std::fs::create_dir_all;
+use std::path::{Path, PathBuf};
 
-use super::{get_current_file_id, directory_name};
+use super::{get_file_id, get_directory_name, current_dir};
 
 use google_drive::{Client, traits::FileOps};
+use anyhow::anyhow;
 use zip::read;
 
-pub async fn download_from_drive(client: &Client, overwrite: bool) {
-    let id = get_current_file_id(client).await;
+async fn download_bytes_from_id(client: &Client, id: String) -> anyhow::Result<hyper::body::Bytes> {
+    let download = client.files().download_by_id(&id).await;
+    if download.is_ok() {
+        println!("Downloaded.")
+    }
+
+    download
+}
+
+fn new_download_path<P: AsRef<Path>, S: AsRef<OsStr>>(parent: P, old_name: S) -> PathBuf {
+    parent.as_ref().join(format!("{:?}_new", old_name.as_ref()))
+}
+
+pub async fn download_from_drive(client: &Client, overwrite: bool) -> anyhow::Result<()> {
+    let cwd = current_dir();
+    let directory_name = get_directory_name(&cwd)?;
 
     println!("Downloading file...");
+    let id = get_file_id(client, directory_name).await;
     let bytes = match id {
         Some(id) => {
-            let download = client.files().download_by_id(&id).await;
-            match download {
-                Ok(download) => {
-                    println!("Downloaded.");
-                    download
-                }
-                Err(_) => panic!("Error downloading file")
-            }
+            download_bytes_from_id(client, id).await?
         }
-        None => panic!("No file named {} to download.", directory_name())
+        None => {
+            return Err(anyhow!("No file named {} to download.", directory_name))
+        }
     };
 
-    let raw_bytes: Vec<u8> = bytes.into_iter().collect();
-    let mut buffer = Cursor::new(raw_bytes);
+    let buffer = Cursor::new(bytes);
+    let mut zip = read::ZipArchive::new(buffer)?;
 
-    let mut zip = read::ZipArchive::new(&mut buffer).expect("Error reading downloaded data.");
-
-    let current_dir = current_dir().unwrap();
-    let dir_name = directory_name();
-
-    let current_dir_clone = current_dir.clone();
-    let parent = current_dir_clone.parent().unwrap();
+    let parent = cwd.parent().unwrap();
+    let new_name = new_download_path(parent, directory_name);
     
-    // path of the new extracted folder if not overwriting
-    let new_name = parent.clone().join(format!("{}_new", dir_name));
-    
-    let input;
     if overwrite {
-        input = "y".to_string()
+        zip.extract(cwd)?;
     } else {
-        println!("Overwrite current files (y) or extract to {} (n)?", new_name.file_name().unwrap().to_str().unwrap());
+        println!("Overwrite current files (y) or extract to {} (n)?", get_directory_name(&new_name)?);
         let mut buf = String::new();
         stdin().read_line(&mut buf).unwrap();
-        input = buf.trim().to_lowercase();
-    }
+        
+        let res = match buf.trim() {
+            "y" | "Y" => {
+                zip.extract(cwd)
+            }
+            "n" | "N" => {
+                create_dir_all(new_name.clone())?;
+                zip.extract(new_name)
+            }
+            _ => return Err(anyhow!("Invalid input"))
+        };
 
-    let res = match input.as_str() {
-        "y" => {
-            zip.extract(current_dir)
-        }
-        "n" => {
-            create_dir_all(new_name.clone()).unwrap();
-            zip.extract(new_name)
-        }
-        _ => panic!("Invalid input")
+        match res {
+            Ok(_) => println!("Extracted succesfully."),
+            Err(e) => println!("Error extracting zip. Some files may be corrupted. Error: {e}")
+        };
     };
-    
-    match res {
-        Ok(_) => {
-            println!("Extracted succesfully.");
-        }
-        Err(e) => {
-            println!("Error extracting zip. Some files may be corrupted. Error: {e}")
-        }
-    }
+
+    Ok(())
 }

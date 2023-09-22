@@ -2,13 +2,24 @@ pub mod zip;
 pub mod upload;
 pub mod download;
 
-use std::env::current_dir;
+use std::env;
+use std::path::{Path, PathBuf};
+
+use anyhow::anyhow;
 use google_drive::{Client, types::File};
 
 pub const TEMP_ZIP_LOCATION: &'static str = "filesync_temp.zip";
 
-pub fn directory_name() -> String {
-    current_dir().unwrap().file_name().unwrap().to_os_string().into_string().unwrap()
+pub fn current_dir() -> PathBuf {
+    match env::current_dir() {
+        Ok(dir) => dir,
+        Err(e) => panic!("Error getting current working directory: {:?}", e)
+    }
+}
+
+pub fn get_directory_name(dir: &Path) -> anyhow::Result<&str> {
+    let file_name = dir.file_name().unwrap();
+    file_name.to_str().ok_or_else(|| anyhow!("Invalid characters in directory name."))
 }
 
 pub async fn get_all_files(client: &Client) -> Result<Vec<File>, ()> {
@@ -32,10 +43,9 @@ pub async fn get_all_files(client: &Client) -> Result<Vec<File>, ()> {
     }
 }
 
-pub async fn get_current_file_id(client: &Client) -> Option<String> {
+pub async fn get_file_id(client: &Client, dir_name: &str) -> Option<String> {
     let files = get_all_files(client).await;
 
-    let dir_name = directory_name();
     match files {
         Ok(files) => {
             let mut id = None;
@@ -52,8 +62,10 @@ pub async fn get_current_file_id(client: &Client) -> Option<String> {
     }
 }
 
-pub async fn delete_from_cloud(client: &Client) {
-    let file_id = get_current_file_id(client).await;
+pub async fn delete_from_cloud(client: &Client) -> anyhow::Result<()> {
+    let cwd = current_dir();
+    let directory_name = get_directory_name(&cwd)?;
+    let file_id = get_file_id(client, directory_name).await;
 
     if let Some(id) = file_id {
         let result = client.files().delete(&id, false, false).await;
@@ -63,8 +75,10 @@ pub async fn delete_from_cloud(client: &Client) {
                 println!("Deleted from cloud...")
             }
             Err(_) => {
-                panic!("Couldn't delete from cloud.");
+                return Err(anyhow!("Couldn't delete from cloud."));
             }
         }
     }
+
+    Ok(())
 }
