@@ -10,6 +10,7 @@ use authenticate::token_storing::delete_refresh_token;
 use authenticate::APICredentials;
 
 use tokio;
+
 use std::env::args;
 
 fn help() {
@@ -53,13 +54,8 @@ async fn main() -> anyhow::Result<()> {
             download_from_drive(&client, overwrite).await?
         },
         "logout" => {
-            match delete_refresh_token() {
-                Ok(_) => {
-                    println!("Logged out");
-                },
-                Err(e) => {
-                    println!("{e}");
-                }
+            if delete_refresh_token().is_ok() {
+                println!("Logged out");
             }
         },
         "delete" => {
@@ -79,15 +75,14 @@ async fn main() -> anyhow::Result<()> {
                         println!("{}", file.name);
                     }
                 }
-                Err(_) => {
-                    panic!("Error getting files from drive.");
+                Err(e) => {
+                    return Err(e.context("Getting files from drive."));
                 }
             }
         },
         _ => {
             println!("Invalid argument given.");
             help();
-            return Ok(());
         }
     }
 

@@ -22,8 +22,8 @@ pub fn get_directory_name(dir: &Path) -> anyhow::Result<&str> {
     file_name.to_str().ok_or_else(|| anyhow!("Invalid characters in directory name."))
 }
 
-pub async fn get_all_files(client: &Client) -> Result<Vec<File>, ()> {
-    let files = client.files().list_all(
+pub async fn get_all_files(client: &Client) -> anyhow::Result<Vec<File>> {
+    Ok(client.files().list_all(
         "user",
         "",
         false,
@@ -35,12 +35,7 @@ pub async fn get_all_files(client: &Client) -> Result<Vec<File>, ()> {
         false,
         false,
         ""
-    ).await;
-
-    match files {
-        Ok(files) => Ok(files),
-        Err(_) => Err(())
-    }
+    ).await?)
 }
 
 pub async fn get_file_id(client: &Client, dir_name: &str) -> Option<String> {
